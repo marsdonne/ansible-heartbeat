@@ -1,0 +1,4 @@
+heartbeat_packages:
+  - 0a7add1d9996.tar.bz2
+  - 958e11be8686.tar.bz2
+  - resource-agents-3.9.6.tar.gz

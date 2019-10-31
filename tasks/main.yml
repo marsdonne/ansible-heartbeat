@@ -1,0 +1,139 @@
+---
+
+- name: install the prerequisites packages
+  package:
+    name: "{{ packages }}"
+  vars:
+    packages:
+      - gcc
+      - gcc-c++
+      - autoconf
+      - automake
+      - asciidoc
+      - bzip2
+      - bzip2-devel
+      - e2fsprogs-devel
+      - glib2-devel
+      - libtool
+      - libxml2-devel
+      - libxslt-devel
+      - libtool-ltdl-devel
+
+- name: add group
+  group:
+    name: haclient
+    state: present
+
+- name: add user
+  user:
+    name: hacluster
+    group: haclient
+    shell: /usr/sbin/nologin
+
+- name: upload packages
+  copy:
+    src: files/{{ item }}
+    dest: /tmp/{{ item }}
+    mode: 01777
+    force: yes
+  loop: "{{ heartbeat_packages }}"
+
+- name: unarchive packages
+  unarchive:
+    src: /tmp/{{ item }}
+    dest: /tmp
+    remote_src: yes
+    mode: 01777
+  loop: "{{ heartbeat_packages }}"
+
+- name: build and install glue
+  command: "{{ item }}"
+  args:
+    chdir: "/tmp/Reusable-Cluster-Components-glue--0a7add1d9996/"
+  with_items:
+    - "./autogen.sh"
+    - "./configure --prefix=/usr/local/heartbeat --with-daemon-user=hacluster --with-daemon-group=haclient --enable-fatal-warnings=no LIBS='/lib64/libuuid.so.1'"
+    - "make"
+    - "make install"
+
+- name: build and install resource-agents
+  command: "{{ item }}"
+  args:
+    chdir: "/tmp/resource-agents-3.9.6/"
+  with_items:
+    - "./autogen.sh"
+    - "./configure --prefix=/usr/local/heartbeat --with-daemon-user=hacluster --with-daemon-group=haclient --enable-fatal-warnings=no LIBS='/lib64/libuuid.so.1'"
+    - "make"
+    - "make install"
+
+- name: build and install heartbeat
+  shell: "{{ item }}"
+  args:
+    chdir: "/tmp/Heartbeat-3-0-958e11be8686/"
+  with_items:
+    - "./bootstrap"
+    - "export CFLAGS=\"$CFLAGS -I/usr/local/heartbeat/include -L/usr/local/heartbeat/lib\" && ./configure --prefix=/usr/local/heartbeat --with-daemon-user=hacluster --with-daemon-group=haclient --enable-fatal-warnings=no LIBS='/lib64/libuuid.so.1'"
+    - "make"
+    - "make install"
+
+- name: mkdir /usr/local/heartbeat/usr/lib/ocf/lib/heartbeat/
+  file:
+    path: /usr/local/heartbeat/usr/lib/ocf/lib/heartbeat/
+    state: directory
+
+- name: copy programs
+  copy:
+    src: "/tmp/Heartbeat-3-0-958e11be8686/doc/{{ item }}"
+    dest: "/usr/local/heartbeat/etc/ha.d/{{ item }}"
+    mode: "0600"
+    remote_src: yes
+  with_items:
+    - "ha.cf"
+    - "haresources"
+    - "authkeys"
+
+
+- name: "find libs by patterns 'ocf-*'"
+  find:
+    paths: "/usr/lib/ocf/lib/heartbeat"
+    patterns: "ocf-*"
+  register: _files_ocf_lib
+
+- name: "copy libs by patterns 'cof_*'"
+  copy:
+    src: "{{ item.path }}"
+    dest: "/usr/local/heartbeat/usr/lib/ocf/lib/heartbeat/"
+    remote_src: yes
+  with_items: "{{ _files_ocf_lib.files }}"
+
+- name: "find plugins RAExec by patterns '*'"
+  find:
+    paths: "/usr/local/heartbeat/lib64/heartbeat/plugins/RAExec"
+    patterns: "*"
+  register: _files_plugins_RAExec
+
+- debug:
+    var: _files_plugins_RAExec.files
+
+- name: link plugins RAExec
+  file:
+    src: "{{ item.path }}"
+    dest: "/usr/local/heartbeat/lib/heartbeat/plugins/RAExec/"
+    state: link
+  with_items: "{{ _files_plugins_RAExec.files }}"
+
+- name: "find plugins files by patterns '*'"
+  find:
+    paths: "/usr/local/heartbeat/lib64/heartbeat/plugins"
+    patterns: "*"
+  register: _files_plugins
+
+- debug:
+    var: _files_plugins.files
+
+- name: link plugins files
+  file:
+    src: "{{ item.path }}"
+    dest: "/usr/local/heartbeat/lib/heartbeat/plugins/"
+    state: link
+  with_items: "{{ _files_plugins.files }}"
